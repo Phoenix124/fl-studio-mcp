@@ -22,6 +22,7 @@ from fastmcp import FastMCP
 
 from fl_studio_mcp.tools import (
     register_channel_tools,
+    register_compose_tools,
     register_history_tools,
     register_mixer_tools,
     register_pattern_tools,
@@ -148,6 +149,7 @@ register_history_tools(mcp)
 register_pattern_tools(mcp)
 register_ui_tools(mcp)
 register_playlist_tools(mcp)
+register_compose_tools(mcp)
 
 
 def main():
