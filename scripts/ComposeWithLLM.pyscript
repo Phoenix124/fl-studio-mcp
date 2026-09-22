@@ -294,6 +294,10 @@ def add_notes_to_piano_roll(request):
             midi_note.time = int(ppq * note_time)
             midi_note.length = int(ppq * note_data["duration"])
             midi_note.velocity = note_data.get("velocity", 0.8)
+            # Optional: slide notes (808 glides) and per-note panning.
+            midi_note.slide = bool(note_data.get("slide", False))
+            if "pan" in note_data:
+                midi_note.pan = note_data["pan"]
             flp.score.addNote(midi_note)
 
         return {
