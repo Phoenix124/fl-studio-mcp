@@ -546,6 +546,200 @@ def handle_mixer_get_track_slots(params: dict) -> dict:
     return {"track": track, "name": mixer.getTrackName(track), "slots": slots}
 
 
+# ---------------------------------------------------------------------------
+# Playlist tracks and arrangement markers (lazy imports)
+# ---------------------------------------------------------------------------
+
+def _playlist_mod():
+    import playlist  # noqa: PLC0415
+    return playlist
+
+
+def _arrangement_mod():
+    import arrangement  # noqa: PLC0415
+    return arrangement
+
+
+def _playlist_track_error(pl, track):
+    """Playlist tracks are 1-based, unlike mixer tracks and channels."""
+    if isinstance(track, bool) or not isinstance(track, int):
+        return "track must be an integer"
+    if not 1 <= track <= pl.trackCount():
+        return "track %s out of range 1..%s" % (track, pl.trackCount())
+    return None
+
+
+def handle_playlist_get_tracks(params: dict) -> dict:
+    """List playlist tracks. By default only tracks changed from stock state."""
+    include_default = params.get("include_default", False)
+    try:
+        pl = _playlist_mod()
+        tracks = []
+        for i in range(1, pl.trackCount() + 1):
+            name = pl.getTrackName(i)
+            muted = pl.isTrackMuted(i) == 1
+            solo = pl.isTrackSolo(i) == 1
+            is_default = name == "Track %d" % i and not muted and not solo
+            if is_default and not include_default:
+                continue
+            tracks.append({
+                "index": i,
+                "name": name,
+                "color": pl.getTrackColor(i),
+                "is_muted": muted,
+                "is_solo": solo,
+            })
+        return {"tracks": tracks, "count": pl.trackCount()}
+    except ImportError:
+        return {"error": "playlist module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_playlist_set_track_name(params: dict) -> dict:
+    try:
+        pl = _playlist_mod()
+        track = params.get("track")
+        err = _playlist_track_error(pl, track)
+        if err:
+            return {"error": err}
+        pl.setTrackName(track, params.get("name", ""))
+        return {"track": track, "name": pl.getTrackName(track)}
+    except ImportError:
+        return {"error": "playlist module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_playlist_set_track_color(params: dict) -> dict:
+    try:
+        pl = _playlist_mod()
+        track = params.get("track")
+        err = _playlist_track_error(pl, track)
+        if err:
+            return {"error": err}
+        r = params.get("r", 0)
+        g = params.get("g", 0)
+        b = params.get("b", 0)
+        # FL Studio's scripting API takes 0xRRGGBB
+        pl.setTrackColor(track, (r << 16) | (g << 8) | b)
+        return {"track": track, "color": "RGB(%s, %s, %s)" % (r, g, b)}
+    except ImportError:
+        return {"error": "playlist module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_playlist_mute_track(params: dict) -> dict:
+    try:
+        pl = _playlist_mod()
+        track = params.get("track")
+        err = _playlist_track_error(pl, track)
+        if err:
+            return {"error": err}
+        muted = params.get("muted")
+        # muteTrack only toggles, so skip the toggle when already in the state.
+        if muted is None or (pl.isTrackMuted(track) == 1) != bool(muted):
+            pl.muteTrack(track)
+        return {"track": track, "name": pl.getTrackName(track),
+                "is_muted": pl.isTrackMuted(track) == 1}
+    except ImportError:
+        return {"error": "playlist module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_playlist_solo_track(params: dict) -> dict:
+    try:
+        pl = _playlist_mod()
+        track = params.get("track")
+        err = _playlist_track_error(pl, track)
+        if err:
+            return {"error": err}
+        solo = params.get("solo")
+        if solo is None or (pl.isTrackSolo(track) == 1) != bool(solo):
+            pl.soloTrack(track)
+        return {"track": track, "name": pl.getTrackName(track),
+                "is_solo": pl.isTrackSolo(track) == 1}
+    except ImportError:
+        return {"error": "playlist module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_arrangement_add_marker(params: dict) -> dict:
+    """Add a time marker; time in beats from song start (None = playhead)."""
+    try:
+        arr = _arrangement_mod()
+        general = _general_mod()
+        name = params.get("name", "Marker")
+        time_beats = params.get("time_beats")
+        ppq = general.getRecPPQ()
+        if time_beats is None:
+            time_ticks = arr.currentTime(0)
+        else:
+            time_ticks = int(round(float(time_beats) * ppq))
+        arr.addAutoTimeMarker(time_ticks, name)
+        return {"name": name, "time_ticks": time_ticks,
+                "time_beats": time_ticks / ppq}
+    except ImportError:
+        return {"error": "arrangement module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_arrangement_get_markers(params: dict) -> dict:
+    try:
+        arr = _arrangement_mod()
+        markers = []
+        # No marker-count API: names run out when getMarkerName returns "".
+        for i in range(500):
+            name = arr.getMarkerName(i)
+            if not name:
+                break
+            markers.append({"index": i, "name": name})
+        return {"markers": markers}
+    except ImportError:
+        return {"error": "arrangement module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_arrangement_jump_to_marker(params: dict) -> dict:
+    """Jump playhead to the next or previous marker."""
+    try:
+        arr = _arrangement_mod()
+        direction = params.get("direction", "next")
+        if direction not in ("next", "prev"):
+            return {"error": "direction must be 'next' or 'prev'"}
+        arr.jumpToMarker(1 if direction == "next" else -1, False)
+        return {"jumped": direction}
+    except ImportError:
+        return {"error": "arrangement module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def handle_arrangement_get_time(params: dict) -> dict:
+    """Get playhead position and timeline selection in ticks and beats."""
+    try:
+        arr = _arrangement_mod()
+        general = _general_mod()
+        ppq = general.getRecPPQ()
+        current = arr.currentTime(0)
+        return {
+            "ppq": ppq,
+            "current_ticks": current,
+            "current_beats": current / ppq,
+            "selection_start_ticks": arr.selectionStart(),
+            "selection_end_ticks": arr.selectionEnd(),
+        }
+    except ImportError:
+        return {"error": "arrangement module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def handle_general_undo(params: dict) -> dict:
     try:
         general = _general_mod()
@@ -689,6 +883,26 @@ def dispatch_command(action: str, params: dict) -> dict:
         return handle_mixer_get_routing(params)
     elif action == "mixer.getTrackSlots":
         return handle_mixer_get_track_slots(params)
+
+    # Playlist and arrangement commands
+    elif action == "playlist.getTracks":
+        return handle_playlist_get_tracks(params)
+    elif action == "playlist.setTrackName":
+        return handle_playlist_set_track_name(params)
+    elif action == "playlist.setTrackColor":
+        return handle_playlist_set_track_color(params)
+    elif action == "playlist.muteTrack":
+        return handle_playlist_mute_track(params)
+    elif action == "playlist.soloTrack":
+        return handle_playlist_solo_track(params)
+    elif action == "arrangement.addMarker":
+        return handle_arrangement_add_marker(params)
+    elif action == "arrangement.getMarkers":
+        return handle_arrangement_get_markers(params)
+    elif action == "arrangement.jumpToMarker":
+        return handle_arrangement_jump_to_marker(params)
+    elif action == "arrangement.getTime":
+        return handle_arrangement_get_time(params)
 
     # Channel commands
     elif action == "channels.getCount":
