@@ -547,6 +547,68 @@ def handle_mixer_get_track_slots(params: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Metronome
+# ---------------------------------------------------------------------------
+
+def handle_transport_set_metronome(params: dict) -> dict:
+    """Enable, disable or toggle the metronome (globalTransport can only toggle)."""
+    try:
+        ui = _ui_mod()
+        midi_mod = _midi_mod()
+        enabled = params.get("enabled")
+        current = ui.isMetronomeEnabled() == 1
+        if enabled is None or current != bool(enabled):
+            transport.globalTransport(midi_mod.FPT_Metronome, 1)
+            # FL applies the toggle asynchronously; re-reading here races and
+            # can report the old state, so return the computed one.
+            current = not current
+        return {"metronome": current}
+    except ImportError:
+        return {"error": "ui/midi module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Project snapshot: the whole project state in one MIDI round-trip
+# ---------------------------------------------------------------------------
+
+def handle_project_get_snapshot(params: dict) -> dict:
+    """Aggregate project state by reusing the individual handlers.
+
+    Sections that need modules missing on older FL versions degrade to an
+    inline {"error": ...} instead of failing the whole snapshot.
+    """
+    snapshot = {
+        "tempo_bpm": _current_bpm(),
+        "transport": handle_transport_get_status(),
+        "patterns": handle_patterns_get_all({}),
+        "channels": handle_channels_get_all(),
+        "mixer_tracks": handle_mixer_get_all_tracks({"include_empty": False}),
+        "playlist_tracks": handle_playlist_get_tracks({}),
+        "markers": handle_arrangement_get_markers({}),
+        "undo": handle_general_get_undo_status({}),
+    }
+    # Insert effects for every named mixer track (in-process, no extra trips).
+    tracks = snapshot["mixer_tracks"].get("tracks") or []
+    fx = {}
+    for t in tracks:
+        index = t.get("index")
+        if index is None:
+            continue
+        slots = handle_mixer_get_track_slots({"track": index}).get("slots") or []
+        if slots:
+            fx[str(index)] = slots
+    snapshot["mixer_fx_slots"] = fx
+    try:
+        ui = _ui_mod()
+        snapshot["metronome"] = ui.isMetronomeEnabled() == 1
+    except Exception:
+        snapshot["metronome"] = None
+    return snapshot
+
+
+# ---------------------------------------------------------------------------
 # Playlist tracks and arrangement markers (lazy imports)
 # ---------------------------------------------------------------------------
 
@@ -903,6 +965,10 @@ def dispatch_command(action: str, params: dict) -> dict:
         return handle_arrangement_jump_to_marker(params)
     elif action == "arrangement.getTime":
         return handle_arrangement_get_time(params)
+    elif action == "transport.setMetronome":
+        return handle_transport_set_metronome(params)
+    elif action == "project.getSnapshot":
+        return handle_project_get_snapshot(params)
 
     # Channel commands
     elif action == "channels.getCount":

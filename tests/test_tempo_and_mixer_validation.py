@@ -104,3 +104,34 @@ def test_get_track_peaks_strips_success_key(monkeypatch):
 
     assert "success" not in result
     assert result["left"] == 0.5
+
+
+def test_set_metronome_passes_explicit_state_and_toggle(monkeypatch):
+    conn = Recorder({"success": True, "metronome": True})
+    tools = _register(monkeypatch, conn)
+
+    result = tools["fl_set_metronome"](enabled=True)
+    tools["fl_set_metronome"]()
+
+    assert conn.sent == [
+        ("transport.setMetronome", {"enabled": True}),
+        ("transport.setMetronome", {"enabled": None}),
+    ]
+    assert "on" in result
+
+
+def test_project_snapshot_strips_success_and_keeps_sections(monkeypatch):
+    conn = Recorder({
+        "success": True,
+        "tempo_bpm": 130.0,
+        "transport": {"is_playing": False},
+        "patterns": {"error": "patterns module not available"},
+        "metronome": False,
+    })
+    tools = _register(monkeypatch, conn)
+
+    result = tools["fl_project_snapshot"]()
+
+    assert "success" not in result
+    assert result["tempo_bpm"] == 130.0
+    assert result["patterns"]["error"].startswith("patterns module")
