@@ -391,6 +391,161 @@ def _general_mod():
     return general
 
 
+def _midi_mod():
+    import midi  # noqa: PLC0415
+    return midi
+
+
+# ---------------------------------------------------------------------------
+# Tempo
+# ---------------------------------------------------------------------------
+
+# FL Studio's own tempo bounds (the BPM field clamps to this range).
+TEMPO_MIN = 10.0
+TEMPO_MAX = 522.0
+
+
+def _current_bpm() -> float:
+    """Current tempo in BPM, whatever unit this FL version reports.
+
+    getCurrentTempo returns plain BPM on some FL versions and BPM*1000 on
+    others; BPM*1000 is always >= 10000 while plain BPM tops out at 522.
+    """
+    raw = mixer.getCurrentTempo(0)
+    return raw / 1000.0 if raw >= 10000 else float(raw)
+
+
+def handle_transport_get_tempo() -> dict:
+    """Get the current project tempo in BPM."""
+    return {"bpm": _current_bpm()}
+
+
+def handle_transport_set_tempo(params: dict) -> dict:
+    """Set the project tempo in BPM via a REC event (the only scriptable way)."""
+    bpm = params.get("bpm")
+    if bpm is None:
+        return {"error": "bpm is required"}
+    try:
+        bpm = float(bpm)
+    except (TypeError, ValueError):
+        return {"error": "bpm must be a number"}
+    if not TEMPO_MIN <= bpm <= TEMPO_MAX:
+        return {"error": "bpm must be between %s and %s" % (TEMPO_MIN, TEMPO_MAX)}
+    try:
+        general = _general_mod()
+        midi_mod = _midi_mod()
+        general.processRECEvent(
+            midi_mod.REC_Tempo,
+            int(round(bpm * 1000)),
+            midi_mod.REC_Control | midi_mod.REC_UpdateControl,
+        )
+        return {"bpm": _current_bpm()}
+    except ImportError:
+        return {"error": "general/midi module not available"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Mixer peaks, routing and insert slots
+# ---------------------------------------------------------------------------
+
+def _track_error(track):
+    if isinstance(track, bool) or not isinstance(track, int):
+        return "track must be an integer"
+    if not 0 <= track < mixer.trackCount():
+        return "track %s out of range 0..%s" % (track, mixer.trackCount() - 1)
+    return None
+
+
+def handle_mixer_get_peaks(params: dict) -> dict:
+    """Get the current output peak levels of one mixer track (playback only)."""
+    track = params.get("track", 0)
+    err = _track_error(track)
+    if err:
+        return {"error": err}
+    left = mixer.getTrackPeaks(track, 0)
+    right = mixer.getTrackPeaks(track, 1)
+    return {
+        "track": track,
+        "name": mixer.getTrackName(track),
+        "left": left,
+        "right": right,
+        "clipping": left > 1.0 or right > 1.0,
+    }
+
+
+def handle_mixer_get_all_peaks(params: dict) -> dict:
+    """Get peak levels of every track currently producing signal."""
+    threshold = params.get("threshold", 0.0001)
+    peaks = []
+    for i in range(mixer.trackCount()):
+        left = mixer.getTrackPeaks(i, 0)
+        right = mixer.getTrackPeaks(i, 1)
+        if left > threshold or right > threshold:
+            peaks.append({
+                "track": i,
+                "name": mixer.getTrackName(i),
+                "left": left,
+                "right": right,
+                "clipping": left > 1.0 or right > 1.0,
+            })
+    return {"peaks": peaks, "is_playing": transport.isPlaying() == 1}
+
+
+def handle_mixer_route_to(params: dict) -> dict:
+    """Enable or disable a send from one mixer track to another."""
+    source = params.get("source")
+    dest = params.get("dest")
+    enabled = params.get("enabled", True)
+    for name, value in (("source", source), ("dest", dest)):
+        err = _track_error(value)
+        if err:
+            return {"error": "%s: %s" % (name, err)}
+    if source == dest:
+        return {"error": "source and dest must differ"}
+    mixer.setRouteTo(source, dest, 1 if enabled else 0)
+    mixer.afterRoutingChanged()
+    return {
+        "source": source,
+        "dest": dest,
+        "active": mixer.getRouteSendActive(source, dest) == 1,
+    }
+
+
+def handle_mixer_get_routing(params: dict) -> dict:
+    """List the destination tracks a mixer track sends to."""
+    track = params.get("track", 0)
+    err = _track_error(track)
+    if err:
+        return {"error": err}
+    routes = [
+        {"track": i, "name": mixer.getTrackName(i)}
+        for i in range(mixer.trackCount())
+        if i != track and mixer.getRouteSendActive(track, i) == 1
+    ]
+    return {"track": track, "name": mixer.getTrackName(track), "routes_to": routes}
+
+
+def handle_mixer_get_track_slots(params: dict) -> dict:
+    """List the effect plugins loaded in a mixer track's 10 insert slots."""
+    track = params.get("track", 0)
+    err = _track_error(track)
+    if err:
+        return {"error": err}
+    slots = []
+    for slot in range(10):
+        try:
+            if plugins.isValid(track, slot, True) == 1:
+                slots.append({
+                    "slot": slot,
+                    "name": plugins.getPluginName(track, slot, True),
+                })
+        except Exception:
+            continue
+    return {"track": track, "name": mixer.getTrackName(track), "slots": slots}
+
+
 def handle_general_undo(params: dict) -> dict:
     try:
         general = _general_mod()
@@ -496,6 +651,10 @@ def dispatch_command(action: str, params: dict) -> dict:
         return handle_transport_set_loop_mode(params)
     elif action == "transport.setPlaybackSpeed":
         return handle_transport_set_playback_speed(params)
+    elif action == "transport.getTempo":
+        return handle_transport_get_tempo()
+    elif action == "transport.setTempo":
+        return handle_transport_set_tempo(params)
 
     # Mixer commands
     elif action == "mixer.getTrackCount":
@@ -520,6 +679,16 @@ def dispatch_command(action: str, params: dict) -> dict:
         return handle_mixer_set_track_color(params)
     elif action == "mixer.setStereoSep":
         return handle_mixer_set_stereo_sep(params)
+    elif action == "mixer.getPeaks":
+        return handle_mixer_get_peaks(params)
+    elif action == "mixer.getAllPeaks":
+        return handle_mixer_get_all_peaks(params)
+    elif action == "mixer.routeTo":
+        return handle_mixer_route_to(params)
+    elif action == "mixer.getRouting":
+        return handle_mixer_get_routing(params)
+    elif action == "mixer.getTrackSlots":
+        return handle_mixer_get_track_slots(params)
 
     # Channel commands
     elif action == "channels.getCount":
