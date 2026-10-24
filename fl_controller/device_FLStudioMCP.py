@@ -25,6 +25,7 @@ from pathlib import Path
 
 # FL Studio API modules (available when running inside FL Studio)
 import channels
+import midi
 import mixer
 import plugins
 import transport
