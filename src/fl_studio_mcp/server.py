@@ -44,17 +44,24 @@ This server provides tools to control FL Studio through its Python scripting API
 FL Studio must be running with the FLStudioMCP MIDI controller enabled.
 
 Available tool categories:
-- Transport: Play, stop, record, tempo, position control
-- Mixer: Volume, pan, mute, solo, track management
+- Transport: Play, stop, record, tempo, metronome, position control
+- Mixer: Volume, pan, mute, solo, routing, peak meters, insert FX slots
 - Channels: Channel info, note triggering, step sequencer
 - Plugins: Parameter control, preset navigation (cannot load new plugins)
+- Piano roll: Add/delete/read notes, chords, piano roll context
+- Composition: Diatonic chord progressions, humanize (velocity/timing/swing)
+- Patterns: List, select, create, clone, rename
+- Playlist & arrangement: Track name/color/mute/solo, time markers
+- Undo: Labelled undo points, undo/redo, undo history status
+- Windows: Show, hide and focus FL Studio windows; retarget the piano roll
+- Project snapshot: Whole-project overview in one round-trip
 
 Important limitations:
 1. Cannot load new VST/AU plugins - only control existing ones
-2. Cannot create new patterns programmatically
+2. Cannot place clips on the playlist or create automation clips
 3. Note triggering (fl_trigger_note) is real-time only - notes won't persist
-   unless FL Studio is recording. Use step sequencer (fl_set_grid_bit) for
-   persistent drum patterns.
+   unless FL Studio is recording. Use step sequencer (fl_set_grid_bit) or the
+   piano roll tools for persistent notes.
 """,
 )
 

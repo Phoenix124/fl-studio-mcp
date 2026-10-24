@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from fl_studio_mcp.utils.validation import rgb_error
+
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
@@ -31,7 +33,9 @@ def register_playlist_tools(mcp: FastMCP) -> None:
     def fl_get_playlist_tracks(include_default: bool = False) -> dict:
         """List playlist tracks (name, color, mute/solo state).
 
-        By default only tracks changed from their stock state are returned.
+        By default only tracks changed from their stock state (renamed,
+        muted or soloed) are returned. A track whose only change is its color
+        is not detected: FL exposes no stock-color baseline to compare against.
         Set include_default=True to list all 500 (slow, rarely useful).
         """
         conn = get_connection()
@@ -77,7 +81,7 @@ def register_playlist_tools(mcp: FastMCP) -> None:
             green: Green component (0-255)
             blue: Blue component (0-255)
         """
-        err = _track_error(track)
+        err = _track_error(track) or rgb_error(red, green, blue)
         if err:
             return err
 

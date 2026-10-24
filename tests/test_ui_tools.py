@@ -68,7 +68,16 @@ def test_open_piano_roll_rejects_negative_channel(env):
     tools, conn = env
 
     assert "error" in tools["fl_open_piano_roll"](-1)
+    assert "error" in tools["fl_open_piano_roll"](True)
     assert conn.sent == []
+
+
+def test_open_piano_roll_accepts_channel_zero(env):
+    tools, conn = env
+
+    tools["fl_open_piano_roll"](0)
+
+    assert conn.sent == [("pianoroll.open", {"index": 0})]
 
 
 def test_window_tools_reject_unknown_window(env):

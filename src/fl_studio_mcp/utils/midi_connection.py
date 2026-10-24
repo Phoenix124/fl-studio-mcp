@@ -263,7 +263,9 @@ class MIDIConnection:
                 try:
                     response_text = self._response_file.read_text()
                     response = json.loads(response_text)
-                except (json.JSONDecodeError, OSError) as e:
+                    if not isinstance(response, dict):
+                        raise ValueError(f"unexpected JSON type {type(response).__name__}")
+                except (ValueError, OSError) as e:  # ValueError covers JSON/Unicode decode errors
                     # The controller is most likely still writing the file
                     # (FL's interpreter cannot rename atomically); poll again
                     # instead of failing on a half-written response.

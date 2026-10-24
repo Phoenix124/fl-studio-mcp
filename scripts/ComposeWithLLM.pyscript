@@ -147,7 +147,11 @@ def process_mcp_request():
             action = request.get("action")
 
             if action == "get_context":
-                context_result = get_piano_roll_context()
+                try:
+                    context_result = get_piano_roll_context()
+                except Exception as e:
+                    # Keep going so the request queue still gets cleared.
+                    context_result = {"status": "error", "message": str(e)}
             elif action == "clear":
                 # Clear all notes
                 count = flp.score.noteCount
@@ -178,7 +182,11 @@ def process_mcp_request():
             "notes_deleted": notes_deleted
         }
         if context_result is not None:
-            summary["context"] = context_result.get("context", context_result)
+            if context_result.get("status") == "error":
+                summary["status"] = "error"
+                summary["message"] = context_result.get("message")
+            else:
+                summary["context"] = context_result.get("context", context_result)
         return summary
 
     except Exception as e:
